@@ -26,6 +26,7 @@ type Lark struct {
 	AdminUserIDs          []string `toml:"admin_user_ids"`
 	AllowedChatIDs        []string `toml:"allowed_chat_ids"`
 	RequireMentionInGroup bool     `toml:"require_mention_in_group"`
+	Domain                string   `toml:"domain"`
 }
 
 type Project struct {
@@ -89,9 +90,8 @@ func (c *Config) Validate() error {
 	if c.Lark.AppSecret == "" {
 		return fmt.Errorf("lark.app_secret is required")
 	}
-	if len(c.Lark.AdminUserIDs) == 0 {
-		return fmt.Errorf("at least one lark.admin_user_ids entry is required")
-	}
+	// Empty admin_user_ids = allow all users (like cc-connect allow_from)
+	// At least one is recommended for production.
 
 	projectNames := make(map[string]bool)
 	for i, p := range c.Projects {

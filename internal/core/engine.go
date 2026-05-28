@@ -358,15 +358,23 @@ func (e *Engine) runAgent(ctx context.Context, ag agent.Agent, key session.Sessi
 			if final == "" {
 				final = "任务完成（无输出）。"
 			}
-			e.reply(ctx, target, fmt.Sprintf("任务完成\n\n%s", truncStr(final, 2000)))
+			replyText := fmt.Sprintf("任务完成\n\n%s", truncStr(final, 2000))
+			e.reply(ctx, target, replyText)
+			if e.logger != nil {
+				e.logger.Info("agent done: session=%s output=%s", key.String(), truncStr(final, 500))
+			}
 			return
 
 		case agent.EventError:
 			e.sessions.SetError(key.String(), event.Error)
 			e.sessions.Transition(key.String(), session.StatusFailed)
 			final := reporter.Final()
-			e.reply(ctx, target, fmt.Sprintf("执行失败：%s\n\n会话：%s\n最近输出：\n%s",
-				event.Error, key.String(), truncStr(final, 500)))
+			errReply := fmt.Sprintf("执行失败：%s\n\n会话：%s\n最近输出：\n%s",
+				event.Error, key.String(), truncStr(final, 500))
+			e.reply(ctx, target, errReply)
+			if e.logger != nil {
+				e.logger.Error("agent error: session=%s err=%s output=%s", key.String(), event.Error, truncStr(final, 300))
+			}
 			return
 		}
 	}

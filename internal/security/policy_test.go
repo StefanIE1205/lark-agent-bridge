@@ -143,15 +143,17 @@ func TestPrivilegedCommands(t *testing.T) {
 
 func TestNewPolicyEmptyAdmins(t *testing.T) {
 	p := NewPolicy(nil, nil, true)
-	if p.IsAdmin("ou_anyone") {
-		t.Error("no one should be admin with empty admin list")
+	// Empty admin list = allow all users (cc-connect style)
+	if !p.IsAdmin("ou_anyone") {
+		t.Error("empty admin list should allow all users")
 	}
 }
 
 func TestNewPolicyEmptyChats(t *testing.T) {
 	p := NewPolicy([]string{"ou_admin"}, nil, true)
-	if p.CanAccess("ou_admin", false, "oc_some_group", true) {
-		t.Error("empty allowed_chat_ids should deny all group chats")
+	// Empty chat allowlist = allow all group chats
+	if !p.CanAccess("ou_admin", false, "oc_some_group", true) {
+		t.Error("empty allowed_chat_ids should allow all group chats")
 	}
 }
 

@@ -72,14 +72,18 @@ admin_user_ids = ["ou_admin"]
 }
 
 func TestLoadNoAdminUsers(t *testing.T) {
+	// Empty admin list now allowed (like cc-connect allow_from)
 	path := writeTemp(t, `
 [lark]
 app_id = "cli_test"
 app_secret = "secret"
 `)
-	_, err := Load(path)
-	if err == nil {
-		t.Fatal("expected error for no admin users")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("empty admin list should be valid: %v", err)
+	}
+	if !cfg.Security.RedactSecrets {
+		// Just verify config loaded correctly
 	}
 }
 

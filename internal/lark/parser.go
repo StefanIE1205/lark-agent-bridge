@@ -18,9 +18,13 @@ func (a *Adapter) parseMessage(event *larkim.P2MessageReceiveV1) core.Message {
 
 	if event.Event != nil {
 		if event.Event.Sender != nil && event.Event.Sender.SenderId != nil {
-			msg.UserID = strVal(event.Event.Sender.SenderId.UserId)
+			// cc-connect priority: OpenId first, then UserId, then UnionId
+			msg.UserID = strVal(event.Event.Sender.SenderId.OpenId)
 			if msg.UserID == "" {
-				msg.UserID = strVal(event.Event.Sender.SenderId.OpenId)
+				msg.UserID = strVal(event.Event.Sender.SenderId.UserId)
+			}
+			if msg.UserID == "" {
+				msg.UserID = strVal(event.Event.Sender.SenderId.UnionId)
 			}
 		}
 
@@ -33,24 +37,35 @@ func (a *Adapter) parseMessage(event *larkim.P2MessageReceiveV1) core.Message {
 			chatType := strVal(m.ChatType)
 			msg.IsDirect = chatType == "p2p"
 
-			msg.Text = extractText(m)
+			rawText := extractText(m)
+			msg.Text = a.removeBotMention(rawText)
 			msg.Mentioned = isMentioned(m)
 		}
 	}
 
-	// Build reply target from parsed data
 	msg.ReplyTarget = core.ReplyTarget{
 		ChatID:   msg.ChatID,
 		ThreadID: msg.ThreadID,
 	}
 
-	// ThreadID fallback per spec
 	if msg.ThreadID == "" {
 		msg.ThreadID = msg.ID
 		msg.ReplyTarget.ThreadID = msg.ID
 	}
 
 	return msg
+}
+
+// removeBotMention strips <at>user_id</at> tags for the bot itself.
+func (a *Adapter) removeBotMention(text string) string {
+	if a.botOpenID == "" {
+		return strings.TrimSpace(text)
+	}
+	// Lark @mention format: <at user_id="ou_xxx">@BotName</at>
+	text = strings.ReplaceAll(text, `<at user_id="`+a.botOpenID+`">@`+a.botName+`</at>`, "")
+	text = strings.ReplaceAll(text, `<at user_id="`+a.botOpenID+`"></at>`, "")
+	text = strings.ReplaceAll(text, "@"+a.botName, "")
+	return strings.TrimSpace(text)
 }
 
 func extractText(m *larkim.EventMessage) string {
@@ -75,6 +90,13 @@ func isMentioned(m *larkim.EventMessage) bool {
 		}
 	}
 	return false
+}
+
+func strPtr(s *string) string {
+	if s == nil {
+		return "<nil>"
+	}
+	return *s
 }
 
 func strVal(s *string) string {

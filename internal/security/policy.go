@@ -26,10 +26,13 @@ func NewPolicy(adminUserIDs []string, allowedChatIDs []string, requireMention bo
 }
 
 func (p *Policy) IsAdmin(userID string) bool {
+	// Empty admin list = allow all users (like cc-connect allow_from)
+	if len(p.adminUserIDs) == 0 {
+		return true
+	}
 	return p.adminUserIDs[userID]
 }
 
-// CanAccess checks whether a message should be processed.
 func (p *Policy) CanAccess(userID string, isDirect bool, chatID string, mentioned bool) bool {
 	if userID == "" {
 		return false
@@ -39,7 +42,8 @@ func (p *Policy) CanAccess(userID string, isDirect bool, chatID string, mentione
 		return p.IsAdmin(userID)
 	}
 
-	if !p.allowedChatIDs[chatID] {
+	// Empty chat allowlist = allow all chats
+	if len(p.allowedChatIDs) > 0 && !p.allowedChatIDs[chatID] {
 		return false
 	}
 
@@ -50,7 +54,6 @@ func (p *Policy) CanAccess(userID string, isDirect bool, chatID string, mentione
 	return true
 }
 
-// CanExecute checks whether a user can run a specific command.
 func (p *Policy) CanExecute(userID string, cmdName string) bool {
 	if p.IsAdmin(userID) {
 		return true

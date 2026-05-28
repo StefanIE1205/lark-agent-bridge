@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewAdapter(t *testing.T) {
-	a := NewAdapter("cli_test", "secret123", nil)
+	a := NewAdapter("cli_test", "secret123", "", nil)
 	if a == nil {
 		t.Fatal("NewAdapter returned nil")
 	}
@@ -21,17 +21,27 @@ func TestNewAdapter(t *testing.T) {
 	if a.appSecret != "secret123" {
 		t.Errorf("appSecret = %q, want %q", a.appSecret, "secret123")
 	}
+	if a.domain != "https://open.feishu.cn" {
+		t.Errorf("domain = %q, want default feishu", a.domain)
+	}
+}
+
+func TestNewAdapterCustomDomain(t *testing.T) {
+	a := NewAdapter("test", "secret", "https://open.larksuite.com", nil)
+	if a.domain != "https://open.larksuite.com" {
+		t.Errorf("domain = %q", a.domain)
+	}
 }
 
 func TestAdapterImplementsPlatform(t *testing.T) {
-	a := NewAdapter("test", "secret", nil)
+	a := NewAdapter("test", "secret", "", nil)
 	if _, ok := interface{}(a).(core.Platform); !ok {
 		t.Error("Adapter does not implement core.Platform")
 	}
 }
 
 func TestUpdateNotImplemented(t *testing.T) {
-	a := NewAdapter("test", "secret", nil)
+	a := NewAdapter("test", "secret", "", nil)
 	err := a.Update(nil, core.ReplyTarget{}, "msg_1", "updated")
 	if err == nil {
 		t.Error("Update should return not implemented error")
@@ -39,7 +49,7 @@ func TestUpdateNotImplemented(t *testing.T) {
 }
 
 func TestIsDuplicate(t *testing.T) {
-	a := NewAdapter("test", "secret", nil)
+	a := NewAdapter("test", "secret", "", nil)
 
 	if a.isDuplicate("msg_001") {
 		t.Error("first occurrence should not be duplicate")
@@ -53,9 +63,8 @@ func TestIsDuplicate(t *testing.T) {
 }
 
 func TestPurgeOldEntries(t *testing.T) {
-	a := NewAdapter("test", "secret", nil)
+	a := NewAdapter("test", "secret", "", nil)
 
-	// Insert an entry with an old timestamp
 	a.dedupMu.Lock()
 	a.dedup["old_msg"] = dedupEntry{seen: time.Now().Add(-10 * time.Minute)}
 	a.dedup["new_msg"] = dedupEntry{seen: time.Now()}
