@@ -1,0 +1,41 @@
+data_dir = "~/.lark-agent-bridge"
+default_agent = "codex"
+default_project = "demo"
+progress_interval_ms = 3000
+
+[lark]
+app_id = "cli_xxx"
+app_secret = "xxx"
+admin_user_ids = ["ou_xxx"]
+allowed_chat_ids = []
+require_mention_in_group = true
+
+[[projects]]
+name = "demo"
+path = "C:\\repo\\demo"
+
+[[agents]]
+name = "claude"
+type = "claude"
+command = "claude"
+args = []
+
+[[agents]]
+name = "codex"
+type = "codex"
+command = "codex"
+args = []
+
+[[agents]]
+name = "antigravity"
+type = "antigravity"
+command = "agy"
+args = []
+experimental = true
+
+[security]
+allow_shell = false
+require_confirm_for_write = true
+require_confirm_for_install = true
+require_confirm_for_git_push = true
+redact_secrets = true

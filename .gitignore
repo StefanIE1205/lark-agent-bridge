@@ -1,0 +1,23 @@
+# Binaries
+lab.exe
+lab
+*.exe
+
+# Config (contains secrets)
+config.toml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (runtime)
+.lark-agent-bridge/
+
+# Test
+*.out
