@@ -37,9 +37,14 @@ func (a *Adapter) parseMessage(event *larkim.P2MessageReceiveV1) core.Message {
 			chatType := strVal(m.ChatType)
 			msg.IsDirect = chatType == "p2p"
 
+			// Detect message type
+			msgType := strVal(m.MessageType)
+			msg.HasImage = msgType == "image"
+			msg.HasFile = msgType == "file"
+
 			rawText := extractText(m)
 			msg.Text = a.removeBotMention(rawText)
-			msg.Mentioned = isMentioned(m)
+			msg.Mentioned = a.isBotMentioned(m)
 		}
 	}
 
@@ -83,9 +88,30 @@ func extractText(m *larkim.EventMessage) string {
 	return parsed.Text
 }
 
-func isMentioned(m *larkim.EventMessage) bool {
+// isBotMentioned checks if the current bot is specifically mentioned.
+// If botOpenID is not set, falls back to checking for any mention.
+func (a *Adapter) isBotMentioned(m *larkim.EventMessage) bool {
+	if len(m.Mentions) == 0 {
+		return false
+	}
+
+	// If we don't know the bot's OpenID yet, fall back to any mention
+	if a.botOpenID == "" {
+		for _, mention := range m.Mentions {
+			if mention != nil && mention.Name != nil && *mention.Name != "" {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Check if any mention matches the bot's OpenID
 	for _, mention := range m.Mentions {
-		if mention != nil && mention.Name != nil && *mention.Name != "" {
+		if mention == nil || mention.Id == nil {
+			continue
+		}
+		mentionOpenID := strVal(mention.Id.OpenId)
+		if mentionOpenID == a.botOpenID {
 			return true
 		}
 	}

@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -14,17 +15,21 @@ import (
 
 type mockPlatform struct {
 	replies []string
+	msgID   int
 }
 
 func (p *mockPlatform) Name() string { return "mock" }
 func (p *mockPlatform) Start(ctx context.Context, handler MessageHandler) error {
 	return nil
 }
-func (p *mockPlatform) Reply(ctx context.Context, target ReplyTarget, text string) error {
+func (p *mockPlatform) Reply(ctx context.Context, target ReplyTarget, text string) (string, error) {
 	p.replies = append(p.replies, text)
-	return nil
+	p.msgID++
+	return fmt.Sprintf("msg_%d", p.msgID), nil
 }
 func (p *mockPlatform) Update(ctx context.Context, target ReplyTarget, messageID string, text string) error {
+	// Track updates as replies for testing
+	p.replies = append(p.replies, "[UPDATE "+messageID+"] "+text)
 	return nil
 }
 func (p *mockPlatform) Stop(ctx context.Context) error { return nil }
@@ -53,6 +58,7 @@ func setupEngine(t *testing.T) (*Engine, *mockPlatform) {
 		Store:        stateStore,
 		Agents:       []agent.Agent{agent.NewFakeAgent("")},
 		DefaultAgent: "fake",
+		ProjectNames: []string{"demo"},
 	})
 
 	return eng, platform
@@ -96,8 +102,8 @@ func TestHandleHelp(t *testing.T) {
 func TestHandleAsk(t *testing.T) {
 	eng, plat := setupEngine(t)
 
-	eng.store.SetChatDefault("oc_admin", "project", "demo")
-	eng.store.SetChatDefault("oc_admin", "agent", "fake")
+	eng.store.SetChatDefault("oc_admin", "", "project", "demo")
+	eng.store.SetChatDefault("oc_admin", "", "agent", "fake")
 
 	msg := Message{
 		ChatID:   "oc_admin",
@@ -118,7 +124,7 @@ func TestHandleAsk(t *testing.T) {
 	}
 
 	ack := plat.replies[0]
-	if !strings.Contains(ack, "已收到任务") {
+	if !strings.Contains(ack, "收到") {
 		t.Errorf("expected ACK, got: %s", ack)
 	}
 
@@ -172,8 +178,8 @@ func TestHandleAskUnauthorizedGroup(t *testing.T) {
 func TestHandleStop(t *testing.T) {
 	eng, plat := setupEngine(t)
 
-	eng.store.SetChatDefault("oc_admin", "project", "demo")
-	eng.store.SetChatDefault("oc_admin", "agent", "fake")
+	eng.store.SetChatDefault("oc_admin", "", "project", "demo")
+	eng.store.SetChatDefault("oc_admin", "", "agent", "fake")
 
 	// Start a long-running task
 	eng.agents["fake"] = agent.NewFakeAgent("long")
@@ -314,11 +320,146 @@ func TestHandleSessions(t *testing.T) {
 	}
 }
 
+func TestProgressIntervalFromConfig(t *testing.T) {
+	platform := &mockPlatform{}
+	stateStore, _ := store.NewStateStore(t.TempDir())
+
+	eng := NewEngine(EngineConfig{
+		Platform:           platform,
+		Policy:             security.NewPolicy([]string{"ou_admin"}, []string{}, true),
+		Sessions:           session.NewManager(),
+		Store:              stateStore,
+		Agents:             []agent.Agent{agent.NewFakeAgent("")},
+		DefaultAgent:       "fake",
+		ProgressIntervalMs: 15000,
+	})
+
+	if eng.progressInterval() != 15*time.Second {
+		t.Errorf("expected 15s, got %v", eng.progressInterval())
+	}
+}
+
+func TestProgressIntervalDefault(t *testing.T) {
+	platform := &mockPlatform{}
+	stateStore, _ := store.NewStateStore(t.TempDir())
+
+	eng := NewEngine(EngineConfig{
+		Platform:     platform,
+		Policy:       security.NewPolicy([]string{"ou_admin"}, []string{}, true),
+		Sessions:     session.NewManager(),
+		Store:        stateStore,
+		Agents:       []agent.Agent{agent.NewFakeAgent("")},
+		DefaultAgent: "fake",
+		// ProgressIntervalMs not set — should default to 3000
+	})
+
+	if eng.progressInterval() != 3*time.Second {
+		t.Errorf("expected 3s default, got %v", eng.progressInterval())
+	}
+}
+
+func TestRunAgentPassesWorkDir(t *testing.T) {
+	eng, plat := setupEngine(t)
+
+	// Bind project to a specific path
+	eng.store.BindProject("myproject", "C:\\work\\myproject")
+	eng.store.SetChatDefault("oc_admin", "", "project", "myproject")
+	eng.store.SetChatDefault("oc_admin", "", "agent", "fake")
+
+	msg := Message{
+		ChatID:   "oc_admin",
+		ThreadID: "ot_thread",
+		UserID:   "ou_admin",
+		IsDirect: true,
+		Text:     "/ask check workdir",
+	}
+
+	eng.HandleMessage(context.Background(), msg)
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify the agent received the correct WorkDir
+	// The fake agent stores opts, we can check via the session
+	sessKey := session.DeriveKey("oc_admin", "ot_thread", "myproject", "fake")
+	sess := eng.sessions.Get(sessKey.String())
+	if sess == nil {
+		t.Fatal("expected session to exist")
+	}
+
+	// The fake agent's session should have WorkDir set
+	// We verify by checking that the ACK mentions the project
+	ack := plat.replies[0]
+	if !strings.Contains(ack, "收到") {
+		t.Errorf("expected ACK, got: %s", ack)
+	}
+
+	// Verify the session was created with correct workDir
+	if sess.WorkDir != "C:\\work\\myproject" {
+		t.Errorf("expected WorkDir 'C:\\work\\myproject', got %q", sess.WorkDir)
+	}
+}
+
+func TestHandleApproveAndDeny(t *testing.T) {
+	eng, plat := setupEngine(t)
+
+	// Create a pending approval request
+	req := eng.approval.Create("test-session", "npm install", "medium")
+
+	// Approve it
+	approveMsg := Message{
+		ChatID:   "oc_admin",
+		UserID:   "ou_admin",
+		IsDirect: true,
+		Text:     "/approve " + req.ID,
+	}
+	eng.HandleMessage(context.Background(), approveMsg)
+
+	if !strings.Contains(plat.lastReply(), "已批准") {
+		t.Errorf("expected approval confirmation, got: %s", plat.lastReply())
+	}
+
+	// Verify status changed
+	if eng.approval.Get(req.ID).Status != security.ApprovalGranted {
+		t.Error("expected approval status to be granted")
+	}
+}
+
+func TestHandleApproveNotFound(t *testing.T) {
+	eng, plat := setupEngine(t)
+
+	msg := Message{
+		ChatID:   "oc_admin",
+		UserID:   "ou_admin",
+		IsDirect: true,
+		Text:     "/approve nonexistent",
+	}
+	eng.HandleMessage(context.Background(), msg)
+
+	if !strings.Contains(plat.lastReply(), "操作失败") {
+		t.Errorf("expected error for missing request, got: %s", plat.lastReply())
+	}
+}
+
+func TestHandleApproveNoArgs(t *testing.T) {
+	eng, plat := setupEngine(t)
+
+	msg := Message{
+		ChatID:   "oc_admin",
+		UserID:   "ou_admin",
+		IsDirect: true,
+		Text:     "/approve",
+	}
+	eng.HandleMessage(context.Background(), msg)
+
+	if !strings.Contains(plat.lastReply(), "用法") {
+		t.Errorf("expected usage message, got: %s", plat.lastReply())
+	}
+}
+
 func TestHandleFakeAgentError(t *testing.T) {
 	eng, plat := setupEngine(t)
 
-	eng.store.SetChatDefault("oc_admin", "project", "demo")
-	eng.store.SetChatDefault("oc_admin", "agent", "fake")
+	eng.store.SetChatDefault("oc_admin", "", "project", "demo")
+	eng.store.SetChatDefault("oc_admin", "", "agent", "fake")
 	eng.agents["fake"] = agent.NewFakeAgent("error")
 
 	msg := Message{
@@ -335,5 +476,76 @@ func TestHandleFakeAgentError(t *testing.T) {
 	done := plat.lastReply()
 	if !strings.Contains(done, "执行失败") && !strings.Contains(done, "模拟错误") {
 		t.Errorf("expected error, got: %s", done)
+	}
+}
+
+func TestNaturalLanguageAsk(t *testing.T) {
+	eng, plat := setupEngine(t)
+
+	eng.store.SetChatDefault("oc_admin", "", "project", "demo")
+	eng.store.SetChatDefault("oc_admin", "", "agent", "fake")
+
+	msg := Message{
+		ChatID:   "oc_admin",
+		ThreadID: "ot_thread",
+		UserID:   "ou_admin",
+		IsDirect: true,
+		Text:     "帮我跑一下测试",
+	}
+
+	eng.HandleMessage(context.Background(), msg)
+	time.Sleep(500 * time.Millisecond)
+
+	if len(plat.replies) < 2 {
+		t.Fatalf("expected at least 2 replies, got %d", len(plat.replies))
+	}
+
+	ack := plat.replies[0]
+	if !strings.Contains(ack, "收到") {
+		t.Errorf("expected ACK, got: %s", ack)
+	}
+
+	done := plat.lastReply()
+	if !strings.Contains(done, "任务完成") {
+		t.Errorf("expected done message, got: %s", done)
+	}
+}
+
+func TestNaturalLanguageStop(t *testing.T) {
+	eng, plat := setupEngine(t)
+
+	eng.store.SetChatDefault("oc_admin", "", "project", "demo")
+	eng.store.SetChatDefault("oc_admin", "", "agent", "fake")
+
+	msg := Message{
+		ChatID:   "oc_admin",
+		UserID:   "ou_admin",
+		IsDirect: true,
+		Text:     "停一下",
+	}
+
+	eng.HandleMessage(context.Background(), msg)
+
+	// No active session → should get an error about no session
+	reply := plat.lastReply()
+	if !strings.Contains(reply, "停止失败") && !strings.Contains(reply, "已停止") && !strings.Contains(reply, "无活跃会话") {
+		t.Errorf("expected stop response, got: %s", reply)
+	}
+}
+
+func TestNaturalLanguageStatus(t *testing.T) {
+	eng, plat := setupEngine(t)
+
+	msg := Message{
+		ChatID:   "oc_admin",
+		UserID:   "ou_admin",
+		IsDirect: true,
+		Text:     "现在什么状态",
+	}
+
+	eng.HandleMessage(context.Background(), msg)
+
+	if !strings.Contains(plat.lastReply(), "状态") {
+		t.Errorf("expected status response, got: %s", plat.lastReply())
 	}
 }

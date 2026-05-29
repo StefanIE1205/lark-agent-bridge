@@ -4,13 +4,20 @@ type Policy struct {
 	adminUserIDs   map[string]bool
 	allowedChatIDs map[string]bool
 	requireMention bool
+	devAllowAll    bool
 }
 
-func NewPolicy(adminUserIDs []string, allowedChatIDs []string, requireMention bool) *Policy {
+func NewPolicy(adminUserIDs []string, allowedChatIDs []string, requireMention bool, devAllowAll ...bool) *Policy {
+	allowAll := false
+	if len(devAllowAll) > 0 {
+		allowAll = devAllowAll[0]
+	}
+
 	p := &Policy{
 		adminUserIDs:   make(map[string]bool),
 		allowedChatIDs: make(map[string]bool),
 		requireMention: requireMention,
+		devAllowAll:    allowAll,
 	}
 	for _, id := range adminUserIDs {
 		if id != "" {
@@ -26,9 +33,9 @@ func NewPolicy(adminUserIDs []string, allowedChatIDs []string, requireMention bo
 }
 
 func (p *Policy) IsAdmin(userID string) bool {
-	// Empty admin list = allow all users (like cc-connect allow_from)
+	// Empty admin list: only allow all when devAllowAll is explicitly set
 	if len(p.adminUserIDs) == 0 {
-		return true
+		return p.devAllowAll
 	}
 	return p.adminUserIDs[userID]
 }

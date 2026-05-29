@@ -38,18 +38,14 @@ func (r *ProgressReporter) Write(text string) {
 	}
 }
 
-// Final returns the full accumulated output and sends it immediately.
+// Final returns the full accumulated output without sending it.
+// The caller is responsible for sending the final message.
 func (r *ProgressReporter) Final() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	text := r.buf.String()
 	r.buf.Reset()
-
-	if r.sendFn != nil {
-		r.sendFn(strings.TrimSpace(text))
-	}
-
 	return text
 }
 

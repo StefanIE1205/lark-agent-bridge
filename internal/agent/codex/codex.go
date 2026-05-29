@@ -24,6 +24,15 @@ func (a *Adapter) Name() string {
 	return "codex"
 }
 
+func (a *Adapter) Capabilities() agent.Capability {
+	return agent.Capability{
+		PersistentSession: false,
+		SupportsApproval:  false,
+		SupportsStreaming: true,
+		Experimental:      false,
+	}
+}
+
 func (a *Adapter) Check(ctx context.Context) error {
 	_, err := exec.LookPath(a.command)
 	if err != nil {

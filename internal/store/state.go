@@ -57,29 +57,49 @@ func (s *StateStore) BindProject(name, path string) error {
 	return s.SaveProjects(projects)
 }
 
-// SetChatDefault sets the default project or agent for a chat.
-func (s *StateStore) SetChatDefault(chatID string, key string, value string) error {
+// chatKey creates a composite key for chat defaults.
+// For group chats with threadID, uses "chatID:threadID".
+// For direct chats or when threadID is empty, uses just chatID.
+func chatKey(chatID, threadID string) string {
+	if threadID == "" {
+		return chatID
+	}
+	return chatID + ":" + threadID
+}
+
+// SetChatDefault sets the default project or agent for a chat/thread.
+func (s *StateStore) SetChatDefault(chatID, threadID, key, value string) error {
 	defaults, err := s.loadChatDefaults()
 	if err != nil {
 		return fmt.Errorf("store: set chat default: %w", err)
 	}
-	entry := defaults[chatID]
+	k := chatKey(chatID, threadID)
+	entry := defaults[k]
 	switch key {
 	case "project":
 		entry.Project = value
 	case "agent":
 		entry.Agent = value
 	}
-	defaults[chatID] = entry
+	defaults[k] = entry
 	return s.saveChatDefaults(defaults)
 }
 
-// GetChatDefaults returns the saved defaults for a chat.
-func (s *StateStore) GetChatDefaults(chatID string) (ChatDefaults, error) {
+// GetChatDefaults returns the saved defaults for a chat/thread.
+// Falls back to chat-only key if thread-specific key not found.
+func (s *StateStore) GetChatDefaults(chatID, threadID string) (ChatDefaults, error) {
 	defaults, err := s.loadChatDefaults()
 	if err != nil {
 		return ChatDefaults{}, err
 	}
+	// Try thread-specific key first
+	if threadID != "" {
+		k := chatKey(chatID, threadID)
+		if d, ok := defaults[k]; ok {
+			return d, nil
+		}
+	}
+	// Fallback to chat-only key
 	return defaults[chatID], nil
 }
 

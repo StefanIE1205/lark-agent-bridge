@@ -8,7 +8,7 @@ import (
 type Platform interface {
 	Name() string
 	Start(ctx context.Context, handler MessageHandler) error
-	Reply(ctx context.Context, target ReplyTarget, text string) error
+	Reply(ctx context.Context, target ReplyTarget, text string) (string, error)
 	Update(ctx context.Context, target ReplyTarget, messageID string, text string) error
 	Stop(ctx context.Context) error
 }
@@ -25,6 +25,8 @@ type Message struct {
 	Text        string
 	Mentioned   bool
 	IsDirect    bool
+	HasImage    bool
+	HasFile     bool
 	ReplyTarget ReplyTarget
 	ReceivedAt  time.Time
 }

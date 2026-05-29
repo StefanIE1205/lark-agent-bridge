@@ -82,14 +82,14 @@ func TestStateStoreSetAndGetChatDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.SetChatDefault("oc_chat", "project", "demo"); err != nil {
+	if err := s.SetChatDefault("oc_chat", "", "project", "demo"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetChatDefault("oc_chat", "agent", "codex"); err != nil {
+	if err := s.SetChatDefault("oc_chat", "", "agent", "codex"); err != nil {
 		t.Fatal(err)
 	}
 
-	defaults, err := s.GetChatDefaults("oc_chat")
+	defaults, err := s.GetChatDefaults("oc_chat", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,12 +105,12 @@ func TestStateStoreChatDefaultsPersist(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := NewStateStore(dir)
 
-	s.SetChatDefault("oc_chat", "project", "demo")
-	s.SetChatDefault("oc_chat", "agent", "claude")
+	s.SetChatDefault("oc_chat", "", "project", "demo")
+	s.SetChatDefault("oc_chat", "", "agent", "claude")
 
 	// Create a new store pointing to same dir — should reload
 	s2, _ := NewStateStore(dir)
-	defaults, _ := s2.GetChatDefaults("oc_chat")
+	defaults, _ := s2.GetChatDefaults("oc_chat", "")
 
 	if defaults.Project != "demo" || defaults.Agent != "claude" {
 		t.Errorf("persistence broken: %+v", defaults)
@@ -121,7 +121,7 @@ func TestStateStoreGetMissingChat(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := NewStateStore(dir)
 
-	defaults, err := s.GetChatDefaults("nonexistent")
+	defaults, err := s.GetChatDefaults("nonexistent", "")
 	if err != nil {
 		t.Fatal(err)
 	}

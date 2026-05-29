@@ -25,6 +25,15 @@ func (a *Adapter) Name() string {
 	return "antigravity"
 }
 
+func (a *Adapter) Capabilities() agent.Capability {
+	return agent.Capability{
+		PersistentSession: false,
+		SupportsApproval:  false,
+		SupportsStreaming: true,
+		Experimental:      a.experimental,
+	}
+}
+
 func (a *Adapter) IsExperimental() bool {
 	return a.experimental
 }

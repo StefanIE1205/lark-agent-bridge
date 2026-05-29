@@ -130,6 +130,96 @@ func TestParseMessageBasic(t *testing.T) {
 	}
 }
 
+func TestIsBotMentioned(t *testing.T) {
+	botOpenID := "ou_bot_123"
+
+	tests := []struct {
+		name     string
+		botOID   string
+		mentions []*larkim.MentionEvent
+		want     bool
+	}{
+		{
+			name:   "bot is mentioned",
+			botOID: botOpenID,
+			mentions: []*larkim.MentionEvent{
+				larkim.NewMentionEventBuilder().
+					Name("Bot").
+					Id(larkim.NewUserIdBuilder().OpenId(botOpenID).Build()).
+					Build(),
+			},
+			want: true,
+		},
+		{
+			name:   "other user mentioned, not bot",
+			botOID: botOpenID,
+			mentions: []*larkim.MentionEvent{
+				larkim.NewMentionEventBuilder().
+					Name("Alice").
+					Id(larkim.NewUserIdBuilder().OpenId("ou_alice").Build()).
+					Build(),
+			},
+			want: false,
+		},
+		{
+			name:     "no mentions",
+			botOID:   botOpenID,
+			mentions: nil,
+			want:     false,
+		},
+		{
+			name:   "bot OpenID not set, fallback to any mention",
+			botOID: "",
+			mentions: []*larkim.MentionEvent{
+				larkim.NewMentionEventBuilder().
+					Name("Someone").
+					Build(),
+			},
+			want: true,
+		},
+		{
+			name:   "bot OpenID not set, no mentions",
+			botOID: "",
+			mentions: nil,
+			want:     false,
+		},
+		{
+			name:   "multiple mentions including bot",
+			botOID: botOpenID,
+			mentions: []*larkim.MentionEvent{
+				larkim.NewMentionEventBuilder().
+					Name("Alice").
+					Id(larkim.NewUserIdBuilder().OpenId("ou_alice").Build()).
+					Build(),
+				larkim.NewMentionEventBuilder().
+					Name("Bot").
+					Id(larkim.NewUserIdBuilder().OpenId(botOpenID).Build()).
+					Build(),
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := &Adapter{botOpenID: tt.botOID}
+			m := larkim.NewEventMessageBuilder().
+				MessageId("msg_test").
+				ChatId("oc_chat").
+				ChatType("group").
+				MessageType("text").
+				Content(`{"text":"test"}`).
+				Mentions(tt.mentions).
+				Build()
+
+			got := a.isBotMentioned(m)
+			if got != tt.want {
+				t.Errorf("isBotMentioned() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseMessageThreadIDFallback(t *testing.T) {
 	m := larkim.NewEventMessageBuilder().
 		MessageId("msg_002").

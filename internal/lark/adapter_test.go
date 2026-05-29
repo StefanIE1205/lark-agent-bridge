@@ -1,6 +1,7 @@
 package lark
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -40,11 +41,12 @@ func TestAdapterImplementsPlatform(t *testing.T) {
 	}
 }
 
-func TestUpdateNotImplemented(t *testing.T) {
+func TestUpdateRequiresClient(t *testing.T) {
 	a := NewAdapter("test", "secret", "", nil)
-	err := a.Update(nil, core.ReplyTarget{}, "msg_1", "updated")
+	// Update should fail gracefully when apiClient is not initialized
+	err := a.Update(context.Background(), core.ReplyTarget{}, "msg_1", "updated")
 	if err == nil {
-		t.Error("Update should return not implemented error")
+		t.Error("Update should return error when apiClient is nil")
 	}
 }
 

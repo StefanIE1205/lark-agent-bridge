@@ -141,11 +141,17 @@ func TestPrivilegedCommands(t *testing.T) {
 	}
 }
 
-func TestNewPolicyEmptyAdmins(t *testing.T) {
-	p := NewPolicy(nil, nil, true)
-	// Empty admin list = allow all users (cc-connect style)
+func TestNewPolicyEmptyAdminsWithDevAllowAll(t *testing.T) {
+	p := NewPolicy(nil, nil, true, true)
 	if !p.IsAdmin("ou_anyone") {
-		t.Error("empty admin list should allow all users")
+		t.Error("empty admin list with devAllowAll should allow all users")
+	}
+}
+
+func TestNewPolicyEmptyAdminsWithoutDevAllowAll(t *testing.T) {
+	p := NewPolicy(nil, nil, true)
+	if p.IsAdmin("ou_anyone") {
+		t.Error("empty admin list without devAllowAll should deny all users")
 	}
 }
 

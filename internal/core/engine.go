@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/StefanIE1205/lark-agent-bridge/internal/agent"
+	"github.com/StefanIE1205/lark-agent-bridge/internal/conversation"
 	"github.com/StefanIE1205/lark-agent-bridge/internal/logging"
 	"github.com/StefanIE1205/lark-agent-bridge/internal/security"
 	"github.com/StefanIE1205/lark-agent-bridge/internal/session"
@@ -15,34 +16,54 @@ import (
 )
 
 type Engine struct {
-	platform     Platform
-	policy       *security.Policy
-	sessions     *session.Manager
-	store        *store.StateStore
-	agents       map[string]agent.Agent
-	defaultAgent string
-	logger       *logging.Logger
+	platform          Platform
+	policy            *security.Policy
+	approval          *security.ApprovalManager
+	sessions          *session.Manager
+	store             *store.StateStore
+	agents            map[string]agent.Agent
+	defaultAgent      string
+	logger            *logging.Logger
+	progressIntervalMs int
+	intentRouter      *IntentRouter
 }
 
+type IntentRouter = conversation.Router
+
 type EngineConfig struct {
-	Platform     Platform
-	Policy       *security.Policy
-	Sessions     *session.Manager
-	Store        *store.StateStore
-	Agents       []agent.Agent
-	DefaultAgent string
-	Logger       *logging.Logger
+	Platform          Platform
+	Policy            *security.Policy
+	Sessions          *session.Manager
+	Store             *store.StateStore
+	Agents            []agent.Agent
+	DefaultAgent      string
+	Logger            *logging.Logger
+	ProgressIntervalMs int
+	ProjectNames      []string
 }
 
 func NewEngine(cfg EngineConfig) *Engine {
+	intervalMs := cfg.ProgressIntervalMs
+	if intervalMs <= 0 {
+		intervalMs = 3000
+	}
+
+	agentNames := make([]string, 0, len(cfg.Agents))
+	for _, a := range cfg.Agents {
+		agentNames = append(agentNames, a.Name())
+	}
+
 	e := &Engine{
-		platform:     cfg.Platform,
-		policy:       cfg.Policy,
-		sessions:     cfg.Sessions,
-		store:        cfg.Store,
-		agents:       make(map[string]agent.Agent),
-		defaultAgent: cfg.DefaultAgent,
-		logger:       cfg.Logger,
+		platform:          cfg.Platform,
+		policy:            cfg.Policy,
+		approval:          security.NewApprovalManager(5 * time.Minute),
+		sessions:          cfg.Sessions,
+		store:             cfg.Store,
+		agents:            make(map[string]agent.Agent),
+		defaultAgent:      cfg.DefaultAgent,
+		logger:            cfg.Logger,
+		progressIntervalMs: intervalMs,
+		intentRouter:      conversation.NewRouter(cfg.ProjectNames, agentNames),
 	}
 	for _, a := range cfg.Agents {
 		e.agents[a.Name()] = a
@@ -56,11 +77,25 @@ func (e *Engine) HandleMessage(ctx context.Context, msg Message) {
 		return
 	}
 
-	cmd := ParseCommand(msg.Text)
-	if cmd.Name == "" {
+	// Handle image/file messages
+	if msg.HasImage || msg.HasFile {
+		e.handleAttachment(ctx, msg)
 		return
 	}
 
+	// Try slash command first
+	cmd := ParseCommand(msg.Text)
+	if cmd.Name != "" {
+		e.handleCommand(ctx, msg, cmd)
+		return
+	}
+
+	// Non-slash text: route through Intent Router
+	e.handleNaturalLanguage(ctx, msg)
+}
+
+// handleCommand processes slash commands.
+func (e *Engine) handleCommand(ctx context.Context, msg Message, cmd Command) {
 	if !e.policy.CanExecute(msg.UserID, cmd.Name) {
 		e.reply(ctx, msg.ReplyTarget, "权限不足：你无权执行此命令。")
 		return
@@ -94,6 +129,95 @@ func (e *Engine) HandleMessage(ctx context.Context, msg Message) {
 	}
 }
 
+// handleNaturalLanguage processes natural language messages via Intent Router.
+func (e *Engine) handleNaturalLanguage(ctx context.Context, msg Message) {
+	if msg.Text == "" {
+		return
+	}
+
+	intent := e.intentRouter.Parse(msg.Text)
+
+	switch intent.Type {
+	case conversation.IntentAsk:
+		e.handleNaturalAsk(ctx, msg, intent)
+	case conversation.IntentStop:
+		e.handleStop(ctx, msg)
+	case conversation.IntentStatus:
+		e.handleStatus(ctx, msg)
+	case conversation.IntentHelp:
+		e.handleHelp(ctx, msg)
+	case conversation.IntentApprove:
+		e.handleNaturalApproval(ctx, msg, true)
+	case conversation.IntentDeny:
+		e.handleNaturalApproval(ctx, msg, false)
+	case conversation.IntentIgnore:
+		// Do nothing
+	default:
+		// Treat as ask
+		e.handleNaturalAsk(ctx, msg, intent)
+	}
+}
+
+// handleNaturalAsk processes a natural language ask intent.
+func (e *Engine) handleNaturalAsk(ctx context.Context, msg Message, intent conversation.Intent) {
+	task := intent.Task
+	if task == "" {
+		return
+	}
+
+	// Check permission for ask
+	if !e.policy.CanExecute(msg.UserID, "ask") {
+		e.reply(ctx, msg.ReplyTarget, "权限不足：你无权执行任务。")
+		return
+	}
+
+	// Create a synthetic command for handleAsk
+	cmd := Command{
+		Name: "ask",
+		Args: []string{task},
+	}
+	e.handleAsk(ctx, msg, cmd)
+}
+
+// handleNaturalApproval processes natural language approve/deny.
+func (e *Engine) handleNaturalApproval(ctx context.Context, msg Message, approve bool) {
+	// Find pending approval requests
+	pending := e.approval.Pending()
+	if len(pending) == 0 {
+		e.reply(ctx, msg.ReplyTarget, "当前没有待审批的操作。")
+		return
+	}
+
+	// Approve/deny the most recent pending request
+	req := pending[len(pending)-1]
+	var err error
+	if approve {
+		err = e.approval.Approve(req.ID)
+	} else {
+		err = e.approval.Deny(req.ID)
+	}
+
+	if err != nil {
+		e.reply(ctx, msg.ReplyTarget, fmt.Sprintf("操作失败：%v", err))
+		return
+	}
+
+	action := "已批准"
+	if !approve {
+		action = "已拒绝"
+	}
+	e.reply(ctx, msg.ReplyTarget, fmt.Sprintf("%s（%s）", action, req.Action))
+}
+
+// handleAttachment processes image/file messages.
+func (e *Engine) handleAttachment(ctx context.Context, msg Message) {
+	if msg.HasImage {
+		e.reply(ctx, msg.ReplyTarget, "收到图片。目前图片会作为上下文一起分析，后续版本将支持更智能的图片处理。")
+	} else if msg.HasFile {
+		e.reply(ctx, msg.ReplyTarget, "收到文件。目前文件会作为上下文一起分析，后续版本将支持更智能的文件处理。")
+	}
+}
+
 func (e *Engine) handlePing(ctx context.Context, msg Message) {
 	e.reply(ctx, msg.ReplyTarget, "pong")
 }
@@ -117,7 +241,7 @@ func (e *Engine) handleHelp(ctx context.Context, msg Message) {
 }
 
 func (e *Engine) handleStatus(ctx context.Context, msg Message) {
-	chatDefaults, _ := e.store.GetChatDefaults(msg.ChatID)
+	chatDefaults, _ := e.store.GetChatDefaults(msg.ChatID, msg.ThreadID)
 	sessKey := session.DeriveKey(msg.ChatID, msg.ThreadID,
 		chatDefaults.Project, chatDefaults.Agent)
 	sess := e.sessions.Get(sessKey.String())
@@ -156,7 +280,7 @@ func (e *Engine) handleSessions(ctx context.Context, msg Message) {
 }
 
 func (e *Engine) handleStop(ctx context.Context, msg Message) {
-	chatDefaults, _ := e.store.GetChatDefaults(msg.ChatID)
+	chatDefaults, _ := e.store.GetChatDefaults(msg.ChatID, msg.ThreadID)
 	sessKey := session.DeriveKey(msg.ChatID, msg.ThreadID,
 		chatDefaults.Project, chatDefaults.Agent)
 
@@ -190,7 +314,7 @@ func (e *Engine) handleProject(ctx context.Context, msg Message, cmd Command) {
 	}
 
 	name := cmd.Args[0]
-	if err := e.store.SetChatDefault(msg.ChatID, "project", name); err != nil {
+	if err := e.store.SetChatDefault(msg.ChatID, msg.ThreadID, "project", name); err != nil {
 		e.reply(ctx, msg.ReplyTarget, fmt.Sprintf("设置项目失败：%v", err))
 		return
 	}
@@ -214,7 +338,7 @@ func (e *Engine) handleAgent(ctx context.Context, msg Message, cmd Command) {
 		return
 	}
 
-	if err := e.store.SetChatDefault(msg.ChatID, "agent", name); err != nil {
+	if err := e.store.SetChatDefault(msg.ChatID, msg.ThreadID, "agent", name); err != nil {
 		e.reply(ctx, msg.ReplyTarget, fmt.Sprintf("设置 Agent 失败：%v", err))
 		return
 	}
@@ -228,7 +352,7 @@ func (e *Engine) handleAsk(ctx context.Context, msg Message, cmd Command) {
 	}
 
 	task := cmd.Args[0]
-	chatDefaults, _ := e.store.GetChatDefaults(msg.ChatID)
+	chatDefaults, _ := e.store.GetChatDefaults(msg.ChatID, msg.ThreadID)
 
 	project := chatDefaults.Project
 	if project == "" {
@@ -264,9 +388,9 @@ func (e *Engine) handleAsk(ctx context.Context, msg Message, cmd Command) {
 		return
 	}
 
-	e.reply(ctx, msg.ReplyTarget, fmt.Sprintf("已收到任务，正在处理...\n会话：%s\n项目：%s\nAgent：%s", sessKey.String(), project, agentName))
+	e.reply(ctx, msg.ReplyTarget, fmt.Sprintf("收到。我会在 %s 里用 %s 处理这件事。", project, agentName))
 
-	go e.runAgent(ctx, ag, sessKey, task, msg.ReplyTarget)
+	go e.runAgent(ctx, ag, sessKey, task, workDir, msg.ReplyTarget)
 }
 
 func (e *Engine) handleLog(ctx context.Context, msg Message, cmd Command) {
@@ -280,7 +404,7 @@ func (e *Engine) handleLog(ctx context.Context, msg Message, cmd Command) {
 		}
 	}
 
-	chatDefaults, _ := e.store.GetChatDefaults(msg.ChatID)
+	chatDefaults, _ := e.store.GetChatDefaults(msg.ChatID, msg.ThreadID)
 	sessKey := session.DeriveKey(msg.ChatID, msg.ThreadID,
 		chatDefaults.Project, chatDefaults.Agent)
 
@@ -310,21 +434,36 @@ func (e *Engine) readSessionLog(sessionKey string, maxLines int) []string {
 }
 
 func (e *Engine) handleApproval(ctx context.Context, msg Message, cmd Command) {
-	action := "批准"
+	if len(cmd.Args) < 1 {
+		e.reply(ctx, msg.ReplyTarget, fmt.Sprintf("用法：/%s <request-id>", cmd.Name))
+		return
+	}
+
+	reqID := cmd.Args[0]
+
+	var err error
+	if cmd.Name == "approve" {
+		err = e.approval.Approve(reqID)
+	} else {
+		err = e.approval.Deny(reqID)
+	}
+
+	if err != nil {
+		e.reply(ctx, msg.ReplyTarget, fmt.Sprintf("操作失败：%v", err))
+		return
+	}
+
+	action := "已批准"
 	if cmd.Name == "deny" {
-		action = "拒绝"
+		action = "已拒绝"
 	}
-	reqID := ""
-	if len(cmd.Args) > 0 {
-		reqID = cmd.Args[0]
-	}
-	e.reply(ctx, msg.ReplyTarget, fmt.Sprintf("%s操作已记录（请求ID: %s）", action, reqID))
+	e.reply(ctx, msg.ReplyTarget, fmt.Sprintf("%s（请求ID: %s）", action, reqID))
 }
 
-func (e *Engine) runAgent(ctx context.Context, ag agent.Agent, key session.SessionKey, task string, target ReplyTarget) {
+func (e *Engine) runAgent(ctx context.Context, ag agent.Agent, key session.SessionKey, task string, workDir string, target ReplyTarget) {
 	opts := agent.SessionOptions{
 		SessionKey: key.String(),
-		WorkDir:    "",
+		WorkDir:    workDir,
 	}
 
 	agSess, err := ag.StartSession(ctx, opts)
@@ -381,7 +520,7 @@ func (e *Engine) runAgent(ctx context.Context, ag agent.Agent, key session.Sessi
 }
 
 func (e *Engine) progressInterval() time.Duration {
-	return 3 * time.Second
+	return time.Duration(e.progressIntervalMs) * time.Millisecond
 }
 
 func (e *Engine) resolveWorkDir(project string) (string, error) {
@@ -396,11 +535,24 @@ func (e *Engine) resolveWorkDir(project string) (string, error) {
 	return path, nil
 }
 
-func (e *Engine) reply(ctx context.Context, target ReplyTarget, text string) {
+func (e *Engine) reply(ctx context.Context, target ReplyTarget, text string) string {
 	if e.platform == nil {
+		return ""
+	}
+	msgID, err := e.platform.Reply(ctx, target, text)
+	if err != nil {
+		// Logging would go here; for MVP, silently fail
+		return ""
+	}
+	return msgID
+}
+
+func (e *Engine) updateMessage(ctx context.Context, target ReplyTarget, messageID, text string) {
+	if e.platform == nil || messageID == "" {
 		return
 	}
-	if err := e.platform.Reply(ctx, target, text); err != nil {
-		// Logging would go here; for MVP, silently fail
+	if err := e.platform.Update(ctx, target, messageID, text); err != nil {
+		// Fallback: send as new message
+		e.reply(ctx, target, text)
 	}
 }
