@@ -44,10 +44,19 @@ type SessionOptions struct {
 	Env        []string
 }
 
+// Capability describes what an agent supports.
+type Capability struct {
+	PersistentSession bool `json:"persistent_session"`
+	SupportsApproval  bool `json:"supports_approval"`
+	SupportsStreaming bool `json:"supports_streaming"`
+	Experimental      bool `json:"experimental"`
+}
+
 type Agent interface {
 	Name() string
 	StartSession(ctx context.Context, opts SessionOptions) (AgentSession, error)
 	Check(ctx context.Context) error
+	Capabilities() Capability
 }
 
 type AgentSession interface {

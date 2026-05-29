@@ -1,7 +1,6 @@
 package core
 
 import (
-	"strings"
 	"testing"
 	"time"
 )
@@ -27,20 +26,25 @@ func TestProgressReporterWrites(t *testing.T) {
 }
 
 func TestProgressReporterFinal(t *testing.T) {
-	var finalText string
+	var sent []string
 	r := NewProgressReporter(time.Hour, func(text string) {
-		finalText = text
+		sent = append(sent, text)
 	})
 
 	r.Write("hello")
 	r.Write(" world")
+
+	// Note: first Write may trigger flush due to zero lastSent — that's OK.
+	// The important thing is Final() itself does NOT call sendFn.
+	beforeFinal := len(sent)
 	final := r.Final()
 
 	if final != "hello world" {
 		t.Errorf("Final() = %q, want %q", final, "hello world")
 	}
-	if !strings.Contains(finalText, "hello world") {
-		t.Errorf("sendFn should be called with final text: %q", finalText)
+	// Final() should NOT add more sends
+	if len(sent) != beforeFinal {
+		t.Errorf("Final() should not call sendFn: had %d sends before, now %d", beforeFinal, len(sent))
 	}
 }
 

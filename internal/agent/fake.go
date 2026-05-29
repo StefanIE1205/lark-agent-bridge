@@ -19,6 +19,15 @@ func (a *FakeAgent) Name() string {
 	return "fake"
 }
 
+func (a *FakeAgent) Capabilities() Capability {
+	return Capability{
+		PersistentSession: false,
+		SupportsApproval:  false,
+		SupportsStreaming: true,
+		Experimental:      false,
+	}
+}
+
 func (a *FakeAgent) Check(ctx context.Context) error {
 	return nil
 }
@@ -68,6 +77,11 @@ func (s *FakeSession) Stop(ctx context.Context) error {
 
 func (s *FakeSession) Alive() bool {
 	return s.alive
+}
+
+// WorkDir returns the work directory passed to this session.
+func (s *FakeSession) WorkDir() string {
+	return s.opts.WorkDir
 }
 
 func (s *FakeSession) runNormal(ctx context.Context, prompt string) {

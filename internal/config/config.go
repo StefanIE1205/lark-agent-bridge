@@ -43,11 +43,12 @@ type Agent struct {
 }
 
 type Security struct {
-	AllowShell              bool `toml:"allow_shell"`
-	RequireConfirmForWrite  bool `toml:"require_confirm_for_write"`
+	DevAllowAll              bool `toml:"dev_allow_all"`
+	AllowShell               bool `toml:"allow_shell"`
+	RequireConfirmForWrite   bool `toml:"require_confirm_for_write"`
 	RequireConfirmForInstall bool `toml:"require_confirm_for_install"`
 	RequireConfirmForGitPush bool `toml:"require_confirm_for_git_push"`
-	RedactSecrets           bool `toml:"redact_secrets"`
+	RedactSecrets            bool `toml:"redact_secrets"`
 }
 
 func Load(path string) (*Config, error) {
@@ -90,8 +91,10 @@ func (c *Config) Validate() error {
 	if c.Lark.AppSecret == "" {
 		return fmt.Errorf("lark.app_secret is required")
 	}
-	// Empty admin_user_ids = allow all users (like cc-connect allow_from)
-	// At least one is recommended for production.
+	// Empty admin_user_ids: only allowed when dev_allow_all is explicitly set
+	if len(c.Lark.AdminUserIDs) == 0 && !c.Security.DevAllowAll {
+		return fmt.Errorf("lark.admin_user_ids is empty — set at least one admin or enable security.dev_allow_all for local development")
+	}
 
 	projectNames := make(map[string]bool)
 	for i, p := range c.Projects {

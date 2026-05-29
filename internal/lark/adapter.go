@@ -152,12 +152,12 @@ func (a *Adapter) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (a *Adapter) Reply(ctx context.Context, target core.ReplyTarget, text string) error {
+func (a *Adapter) Reply(ctx context.Context, target core.ReplyTarget, text string) (string, error) {
 	return a.sendMessage(ctx, target, text)
 }
 
 func (a *Adapter) Update(ctx context.Context, target core.ReplyTarget, messageID string, text string) error {
-	return fmt.Errorf("lark: Update not implemented")
+	return a.updateMessage(ctx, messageID, text)
 }
 
 func (a *Adapter) handleMessage(ctx context.Context, event *larkim.P2MessageReceiveV1, handler core.MessageHandler) {

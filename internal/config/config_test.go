@@ -71,19 +71,33 @@ admin_user_ids = ["ou_admin"]
 	}
 }
 
-func TestLoadNoAdminUsers(t *testing.T) {
-	// Empty admin list now allowed (like cc-connect allow_from)
+func TestLoadNoAdminUsersWithDevAllowAll(t *testing.T) {
+	path := writeTemp(t, `
+[lark]
+app_id = "cli_test"
+app_secret = "secret"
+
+[security]
+dev_allow_all = true
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("empty admin list with dev_allow_all should be valid: %v", err)
+	}
+	if !cfg.Security.DevAllowAll {
+		t.Error("expected DevAllowAll to be true")
+	}
+}
+
+func TestLoadNoAdminUsersWithoutDevAllowAll(t *testing.T) {
 	path := writeTemp(t, `
 [lark]
 app_id = "cli_test"
 app_secret = "secret"
 `)
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("empty admin list should be valid: %v", err)
-	}
-	if !cfg.Security.RedactSecrets {
-		// Just verify config loaded correctly
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("empty admin list without dev_allow_all should fail")
 	}
 }
 
